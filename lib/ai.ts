@@ -1,12 +1,19 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
-import { aiClassificationSchema, type AiClassification } from "@/lib/validations/feedback";
+import {
+  aiClassificationSchema,
+  type AiClassification,
+} from "@/lib/validations/feedback";
 
 const anthropic = process.env.ANTHROPIC_API_KEY
-  ? new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  ? new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY,
+    })
   : null;
 
-export async function classifyFeedback(content: string): Promise<AiClassification> {
+export async function classifyFeedback(
+  content: string
+): Promise<AiClassification> {
   if (!anthropic) {
     return localClassificationFallback(content);
   }
@@ -18,9 +25,12 @@ export async function classifyFeedback(content: string): Promise<AiClassificatio
     messages: [
       {
         role: "user",
-        content: `Classify this customer feedback as strict JSON with keys sentiment, sentimentScore, themes, featureArea, rationale.\n\nFeedback:\n${content}`
-      }
-    ]
+        content: `Classify this customer feedback as strict JSON with keys sentiment, sentimentScore, themes, featureArea, rationale.
+
+Feedback:
+${content}`,
+      },
+    ],
   });
 
   const text = message.content
@@ -30,12 +40,15 @@ export async function classifyFeedback(content: string): Promise<AiClassificatio
   return aiClassificationSchema.parse(JSON.parse(text));
 }
 
-export async function answerQuestionWithEvidence(question: string, evidence: string[]) {
+export async function answerQuestionWithEvidence(
+  question: string,
+  evidence: string[]
+) {
   if (!anthropic) {
     return {
       answer:
         "Demo answer: the strongest evidence points to onboarding complexity, mobile review friction, and enterprise setup readiness.",
-      evidence
+      evidence,
     };
   }
 
@@ -46,47 +59,81 @@ export async function answerQuestionWithEvidence(question: string, evidence: str
     messages: [
       {
         role: "user",
-        content: `Answer only from this evidence. If evidence is insufficient, say so.\n\nQuestion: ${question}\n\nEvidence:\n${evidence.join("\n\n")}`
-      }
-    ]
+        content: `Answer only from this evidence. If evidence is insufficient, say so.
+
+Question: ${question}
+
+Evidence:
+${evidence.join("\n\n")}`,
+      },
+    ],
   });
 
   return {
-    answer: message.content.map((block) => (block.type === "text" ? block.text : "")).join(""),
-    evidence
+    answer: message.content
+      .map((block) => (block.type === "text" ? block.text : ""))
+      .join(""),
+    evidence,
   };
 }
 
-function localClassificationFallback(content: string): AiClassification {
+function localClassificationFallback(
+  content: string
+): AiClassification {
   const lower = content.toLowerCase();
-  const negative = ["slow", "hard", "confusing", "cramped", "too noisy", "blocked"].some((word) =>
-    lower.includes(word)
-  );
-  const positive = ["fast", "helped", "valuable", "useful", "easier", "win"].some((word) =>
-    lower.includes(word)
-  );
+
+  const negative = [
+    "slow",
+    "hard",
+    "confusing",
+    "cramped",
+    "too noisy",
+    "blocked",
+  ].some((word) => lower.includes(word));
+
+  const positive = [
+    "fast",
+    "helped",
+    "valuable",
+    "useful",
+    "easier",
+    "win",
+  ].some((word) => lower.includes(word));
+
+  const detectedThemes = inferThemes(lower);
 
   return {
-    sentiment: negative ? "NEGATIVE" : positive ? "POSITIVE" : "NEUTRAL",
+    sentiment: negative
+      ? "NEGATIVE"
+      : positive
+      ? "POSITIVE"
+      : "NEUTRAL",
+
     sentimentScore: negative ? -0.46 : positive ? 0.72 : 0.05,
-    themes: inferThemes(lower),
-    featureArea: inferThemes(lower)[0] ?? "General",
-    rationale: "Classified by local fallback because ANTHROPIC_API_KEY is not configured."
+
+    themes: detectedThemes,
+
+    featureArea: detectedThemes[0] ?? "General",
+
+    rationale:
+      "Classified by local fallback because ANTHROPIC_API_KEY is not configured.",
   };
 }
 
-function inferThemes(lower: string) {
-  const themes = [
+function inferThemes(lower: string): string[] {
+  const themes: [string, string[]][] = [
     ["Onboarding", ["setup", "onboarding", "activation"]],
     ["Authentication", ["sso", "login", "scim", "roles"]],
     ["Mobile Experience", ["mobile", "phone"]],
     ["Reporting", ["report", "export", "pdf"]],
     ["Pricing", ["pricing", "plan", "upgrade"]],
-    ["Search", ["search", "evidence"]]
+    ["Search", ["search", "evidence"]],
   ];
 
   const matches = themes
-    .filter(([, words]) => words.some((word) => lower.includes(word)))
+    .filter(([, words]) =>
+      words.some((word) => lower.includes(word))
+    )
     .map(([name]) => name);
 
   return matches.length > 0 ? matches : ["UX"];
